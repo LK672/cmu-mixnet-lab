@@ -505,11 +505,21 @@ orchestrator::run_state_create_topology() {
         // Mixnet node configuration
         payload->mixing_factor = node.mixing_factor();
         payload->do_random_routing = node.do_random_routing();
+        payload->measure_stp = testcase_->measure_stp();
+        payload->drop_percent = testcase_->link_loss_percent();
         payload->reelection_interval_ms = testcase_->reelection_interval_ms();
         payload->root_hello_interval_ms = testcase_->root_hello_interval_ms();
 
+        // For STP convergence measurement, subscribe to this fragment's pcap
+        // stream up-front (before it starts running STP) so the pcap thread
+        // polls it and delivers mirrored STP packets from the very first one.
+        if (testcase_->measure_stp()) {
+            fragments_[idx].is_pcap_subscribed = true;
+        }
+
         for (uint16_t nid = 0; nid < topology[idx].size(); nid++) {
             payload->link_costs()[nid] = node.link_costs()[nid];
+            payload->link_latency_ms()[nid] = node.link_latency_ms()[nid];
         }
     };
     // Send the message to every fragment

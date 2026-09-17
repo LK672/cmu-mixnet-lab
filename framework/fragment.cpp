@@ -28,6 +28,12 @@ namespace framework {
 using namespace std::chrono;
 typedef high_resolution_clock clock;
 
+// Current monotonic time (ms), used for per-link latency delay queues.
+static uint64_t now_ms() {
+    return duration_cast<milliseconds>(
+        steady_clock::now().time_since_epoch()).count();
+}
+
 /**
  * Helper macros.
  */
@@ -178,6 +184,33 @@ int fragment::node_context::node_send(
     }
     // Regular port
     else {
+        // Mirror STP packets to the orchestrator's pcap plane so it can count
+        // control traffic and detect spanning-tree convergence. We enqueue a
+        // clone (the original continues out on the wire below, then is freed).
+        if (measure_stp && (packet->type == PACKET_TYPE_STP)) {
+            void **mq_ptr = ((void**)
+                message_queue_message_alloc(&mq_pcap));
+
+            // MQ full means the pcap thread isn't draining fast enough; treat
+            // this the same way as the user-output mirror path (fatal exit).
+            if (mq_ptr == NULL) {
+                ts.exited = true;
+                ts.exit_code = error_code::FRAGMENT_PCAP_MQ_FULL;
+                free(packet);
+                throw thread_state::exit_exception();
+            }
+            mixnet_packet *clone = static_cast<mixnet_packet*>(
+                malloc(packet->total_size));
+            memcpy(clone, packet, packet->total_size);
+
+            // Stash the egress port in the clone's reserved field so the
+            // observer can attribute this packet to a specific link. This
+            // only affects the mirrored copy, never the packet on the wire.
+            clone->_reserved[0] = port;
+
+            *mq_ptr = clone; // Enqueue the cloned packet
+            message_queue_write(&mq_pcap, mq_ptr);
+        }
         auto error_code = _send_blocking(
             tx_socket_fds[port], reinterpret_cast<char*>(packet));
 
@@ -226,16 +259,38 @@ int fragment::node_context::node_recv(
 
                 // Received a valid packet
                 if (error_code == error_code::NONE) {
-                    mixnet_packet *packet = reinterpret_cast<
-                            mixnet_packet*>(recv_buffer.get());
-                    num_recvd++;
-                    *port = rx_port_idx;
+                    // Lossy link: with probability drop_percent, discard the
+                    // packet as if it never arrived. The bytes are already
+                    // consumed off the socket, so the stream stays aligned;
+                    // the sender is unaware (silent loss, no retransmit).
+                    const bool drop = (drop_percent > 0) &&
+                        ((rand_r(&loss_rng_) % 100u) <
+                         static_cast<unsigned int>(drop_percent));
 
-                    // Initialize the packet buffer
-                    *ptr = static_cast<mixnet_packet*>(
-                            malloc(packet->total_size));
+                    if (!drop) {
+                        mixnet_packet *packet = reinterpret_cast<
+                                mixnet_packet*>(recv_buffer.get());
 
-                    memcpy(*ptr, recv_buffer.get(), packet->total_size);
+                        if (link_latency_ms[rx_port_idx] == 0) {
+                            // No link latency: deliver immediately.
+                            num_recvd++;
+                            *port = rx_port_idx;
+                            *ptr = static_cast<mixnet_packet*>(
+                                    malloc(packet->total_size));
+                            memcpy(*ptr, recv_buffer.get(), packet->total_size);
+                        }
+                        else {
+                            // Long-distance link: hold the packet until its
+                            // one-way latency elapses (released below). This
+                            // keeps TCP draining without blocking the thread.
+                            const uint64_t release = now_ms() +
+                                link_latency_ms[rx_port_idx];
+                            delay_queues[rx_port_idx].emplace_back(release,
+                                std::vector<char>(recv_buffer.get(),
+                                    recv_buffer.get() + packet->total_size));
+                        }
+                    }
+                    // else: packet "lost" in transit; try another port
                 }
                 // Encountered an error on the receive path
                 else if (error_code != error_code::RECV_ZERO_PENDING) {
@@ -249,6 +304,21 @@ int fragment::node_context::node_recv(
             }
             // Unlock mutex
             else { port_mutexes[rx_port_idx].unlock(); }
+
+            // Release a delayed packet on this port whose latency has elapsed.
+            if ((num_recvd == 0) && !delay_queues[rx_port_idx].empty() &&
+                (delay_queues[rx_port_idx].front().first <= now_ms())) {
+                std::vector<char>& bytes =
+                    delay_queues[rx_port_idx].front().second;
+                mixnet_packet *packet = reinterpret_cast<
+                        mixnet_packet*>(bytes.data());
+                num_recvd++;
+                *port = rx_port_idx;
+                *ptr = static_cast<mixnet_packet*>(
+                        malloc(packet->total_size));
+                memcpy(*ptr, bytes.data(), packet->total_size);
+                delay_queues[rx_port_idx].pop_front();
+            }
         }
         // Compute the next index (round-robin)
         rx_port_idx = ((rx_port_idx + 1) %
@@ -276,6 +346,17 @@ void fragment::init_node_context(
     config->root_hello_interval_ms = p->root_hello_interval_ms;
     config->reelection_interval_ms = p->reelection_interval_ms;
 
+    // Enable STP mirroring (for convergence measurement) from node startup,
+    // so we capture control traffic before the spanning tree stabilizes.
+    node_context_->measure_stp = p->measure_stp;
+
+    // Per-link packet loss (lossy links). Seed a private RNG per fragment so
+    // loss is independent across nodes and doesn't interfere with (or depend
+    // on) node.c's own use of rand().
+    node_context_->drop_percent = p->drop_percent;
+    node_context_->loss_rng_ = (static_cast<unsigned int>(getpid()) ^
+        (static_cast<unsigned int>(config->node_addr) << 16)) | 1u;
+
     const uint16_t num_neighbors = config->num_neighbors;
     if (num_neighbors == 0) { return; } // Nothing to do
 
@@ -292,6 +373,14 @@ void fragment::init_node_context(
     node_context_->rx_socket_fds.resize(num_neighbors, -1);
     node_context_->link_states.resize(num_neighbors, true);
     node_context_->neighbor_netaddrs.resize(num_neighbors, sockaddr_in{});
+
+    // Per-link latency (long-distance links). Copy the per-neighbor delays and
+    // allocate a holding queue per port for delayed delivery.
+    node_context_->link_latency_ms.resize(num_neighbors, 0);
+    for (uint16_t nid = 0; nid < num_neighbors; nid++) {
+        node_context_->link_latency_ms[nid] = p->link_latency_ms()[nid];
+    }
+    node_context_->delay_queues.resize(num_neighbors);
 }
 
 void fragment::destroy_node_context() {

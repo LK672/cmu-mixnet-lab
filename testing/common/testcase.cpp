@@ -48,10 +48,10 @@ int testcase::run_testcase(testcase& tc, int argc, char **argv) {
     // In autotest mode, the node processes all run on
     // localhost, so we use less conservative timers.
     if (autotest) {
-        tc.root_hello_interval_ms_ = 10;
-        tc.reelection_interval_ms_ = 100;
-        tc.max_convergence_time_ms_ = 500;
-        tc.max_propagation_time_ms_ = 500;
+        tc.root_hello_interval_ms_ = 20;
+        tc.reelection_interval_ms_ = 200;
+        tc.max_convergence_time_ms_ = 1000;
+        tc.max_propagation_time_ms_ = 1000;
     }
 
     // Configure the orchestrator

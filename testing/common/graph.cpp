@@ -30,7 +30,8 @@ int graph::get_node_id(const mixnet_address addr) const {
             (iter - nodes_.begin()) : -1);
 }
 
-graph& graph::add_edge(const half_edge src, const half_edge dst) {
+graph& graph::add_edge(const half_edge src, const half_edge dst,
+                       const uint16_t latency_ms) {
     // Sanity check: Ensure indices, costs are permissible
     assert((src.id < num_nodes) && (dst.id < num_nodes));
     assert(src.id != dst.id);
@@ -40,9 +41,12 @@ graph& graph::add_edge(const half_edge src, const half_edge dst) {
         topology_[src.id].end(), dst.id) ==
         topology_[src.id].end());
 
-    // Update the set of edges and cost vectors
+    // Update the set of edges and per-link cost/latency vectors. The latency
+    // is symmetric (a link has one latency in both directions).
     nodes_[src.id].add_link_cost(src.cost);
     nodes_[dst.id].add_link_cost(dst.cost);
+    nodes_[src.id].add_link_latency(latency_ms);
+    nodes_[dst.id].add_link_latency(latency_ms);
     topology_[src.id].push_back(dst.id);
     topology_[dst.id].push_back(src.id);
 

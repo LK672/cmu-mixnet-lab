@@ -78,6 +78,15 @@ public:
     // Accessors
     uint64_t pcap_count() const { return pcap_count_; }
     bool is_pass() const { return (pass_pcap_ && pass_teardown_); }
+
+    // Whether the framework should mirror STP packets to the orchestrator's
+    // pcap plane (from node startup) so a testcase can count control traffic
+    // and detect spanning-tree convergence. Off by default.
+    virtual bool measure_stp() const { return false; }
+
+    // Per-link packet-drop percentage [0,100], applied on the RX path to model
+    // lossy links (e.g., Scenario 2's satellite links). 0 = reliable.
+    virtual uint8_t link_loss_percent() const { return 0; }
     uint32_t root_hello_interval_ms() const { return root_hello_interval_ms_; }
     uint32_t reelection_interval_ms() const { return reelection_interval_ms_; }
     const graph& get_graph() const { assert(graph_ != nullptr); return *graph_; }

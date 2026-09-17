@@ -54,11 +54,15 @@ public:
         uint16_t mixing_factor_ = 1;                // Default: 1
         bool do_random_routing_ = false;            // Default: false
         std::vector<uint16_t> link_costs_;          // Default: all 1
+        std::vector<uint16_t> link_latency_ms_;     // Default: all 0 (no delay)
         mixnet_address mixaddr_ = INVALID_MIXADDR;  // Node's mixnet address
 
-        // Helper function
+        // Helper functions
         void add_link_cost(const uint16_t v) {
             link_costs_.push_back(v);
+        }
+        void add_link_latency(const uint16_t v) {
+            link_latency_ms_.push_back(v);
         }
     public:
         // Public constructor
@@ -69,6 +73,7 @@ public:
         uint16_t mixing_factor() const { return mixing_factor_; }
         bool do_random_routing() const { return do_random_routing_; }
         const std::vector<uint16_t>& link_costs() const { return link_costs_; }
+        const std::vector<uint16_t>& link_latency_ms() const { return link_latency_ms_; }
 
         // Mutators
         void set_mixaddr(const uint16_t v) { mixaddr_ = v; }
@@ -98,7 +103,8 @@ public:
     const node& get_node(const uint16_t id) const { return nodes_.at(id); }
 
     // Mutators. TODO(natre): Ability to modify edge costs.
-    graph& add_edge(const half_edge src, const half_edge dst);
+    graph& add_edge(const half_edge src, const half_edge dst,
+                    const uint16_t latency_ms = 0);
     void set_mixaddrs(const std::vector<mixnet_address>& mixaddrs);
 
     /**

@@ -18,10 +18,12 @@
 #include "mixnet/config.h"
 #include "external/itc/message_queue.h"
 
+#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <netinet/in.h>
 #include <stdint.h>
 #include <thread>
@@ -82,6 +84,12 @@ public:
         std::vector<bool> link_states;                      // NID -> Link state (up: true)
         std::unique_ptr<char[]> recv_buffer{};              // Scratch receive packet buffer
         volatile bool is_pcap_subscribed = false;           // Orchestrator subscribed for pcap?
+        volatile bool measure_stp = false;                  // Mirror STP packets to pcap plane?
+        uint8_t drop_percent = 0;                           // Per-link packet-drop % (lossy links)
+        unsigned int loss_rng_ = 1;                         // Private RNG state for loss (rand_r)
+        std::vector<uint16_t> link_latency_ms;              // NID -> one-way link latency (ms)
+        std::vector<std::deque<std::pair<uint64_t,          // NID -> packets held until their
+            std::vector<char>>>> delay_queues;              //   release time (link latency)
 
         /**
          * Helper methods.

@@ -177,19 +177,27 @@ public:
 
             // Node configuration
             bool do_random_routing;             // Perform random routing?
+            bool measure_stp;                   // Mirror STP packets for convergence measurement
             uint16_t mixing_factor;             // Mixing factor to use during routing
             uint32_t root_hello_interval_ms;    // Time between 'hello' messages
             uint32_t reelection_interval_ms;    // Time before starting reelection
+            uint8_t drop_percent;               // Per-link packet-drop % [0,100] (lossy links)
+            uint8_t _pad[7];                    // Keep VLA (link_costs) 8-byte aligned
 
             // NID -> Cost of routing on the link
             uint16_t *link_costs() {
                 return reinterpret_cast<uint16_t*>(
                     reinterpret_cast<char*>(this) + sizeof(*this));
             }
+            // NID -> One-way link latency in ms (0 = no delay). Second VLA,
+            // laid out immediately after link_costs.
+            uint16_t *link_latency_ms() {
+                return link_costs() + num_neighbors;
+            }
             // Helper methods
             length_t length() const {
                 return (sizeof(*this) +
-                        (num_neighbors * sizeof(uint16_t)));
+                        (2 * num_neighbors * sizeof(uint16_t)));
             }
         };
         CHECK_SIZE_VLA_PTR_ALIGN(topology);

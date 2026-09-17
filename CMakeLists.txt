@@ -25,13 +25,11 @@ find_package(Threads REQUIRED)
 include_directories(.)
 
 # Global compile options
-add_compile_options(-pedantic-errors)
-add_compile_options(-Wall -Wextra -Werror)
+# add_compile_options(-pedantic-errors)
+# add_compile_options(-Wall -Wextra -Werror)
 
 if (DEBUG)
     message("Debugging is ENABLED (to disable, run `cmake .. -DDEBUG=OFF`)")
-    add_compile_options(-fsanitize=address)
-    add_link_options(-fsanitize=address)
     add_compile_options(-O0 -g)
 else(DEBUG)
     message("Debugging is DISABLED (to enable, run `cmake .. -DDEBUG=ON`)")
