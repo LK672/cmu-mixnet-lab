@@ -63,12 +63,12 @@ To run these tests in EC2 in manual mode: one process is the *orchestrator* and 
 - Launch **8 instances in the same region and VPC/subnet** (e.g. `t3.micro`, Ubuntu 26.04), all in **one security group**.
 - Security group rules:
   - Inbound **SSH (22)** from your device (allowlist your device's public IP address. You can use `curl ipinfo.io` to get your current IP address -- note: your IP address may change periodically. If for some reason you suddenly cannot ssh in, check that your IP has not changed).
-  - Inbound **All TCP** with **source = this same security group** (a self-referencing rule). The nodes talk to the orchestrator on ports **9107** (control) and **9108** (pcap), and to *each other* on **ephemeral ports** the framework picks at random — so restricting to a couple of fixed ports will not work. Keeping the cluster in one VPC and allowing all TCP *within the security group only* is the simplest correct setup.
+  - Inbound **All TCP** with **source = this same security group** (a self-referencing rule). The nodes talk to the orchestrator on ports **9107** (control) and **9108** (pcap), and to *each other* on **ephemeral ports** the framework picks at random — so restricting to a couple of fixed ports will not work. Keeping the cluster in one VPC and allowing all TCP *within the security group only*.
 - Use the instances' **private IPs** for all mixnet traffic (they're in the same VPC).
 
 ### 2. Duplicate code onto every instance
 
-You can clone the repo using GitHub for each instance. However, the automation in step 4 rsyncs your local tree to each host and builds it there (by default). Before building, make sure that each instance has built the toolchain (`sudo apt install -y build-essential cmake`);
+You can clone the repo using GitHub for each instance. However, the automation in step 4 rsyncs your local tree to each host and builds it there. Before building, make sure that each instance has built the toolchain (`sudo apt install -y build-essential cmake` <-- this is done automatically for you in the `./run_ec2.sh` script).
 
 ### 3. Launch the orchestrator and the nodes
 
@@ -104,7 +104,7 @@ To help automate the process of running your tests remotely, we've provided an L
 #   ubuntu@10.0.1.11
 #   ubuntu@10.0.1.12
 #   ...
-SSH_KEY=<path to key> ./impls/run_ec2.sh testcase_stp_convergence_line hosts.txt   # rsyncs, builds, runs
+SSH_KEY=<path to key> ./impls/run_ec2.sh testcase_stp_convergence_line hosts.txt 
 ```
 
 After the first run has synced + built every host, add `SYNC=0` to reuse the existing build on later runs:

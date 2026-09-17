@@ -110,6 +110,13 @@ else
     echo ">> building '$NAME' from mixnet/ as-is (baseline) ..."
 fi
 
+# Force the current mixnet/ sources to recompile. A prior `--impl` run restores
+# mixnet/ with `cp -a` (preserving old mtimes), which can leave the built node.o
+# NEWER than node.c, so `make` skips it and silently reuses the previous build's
+# `node` binary — e.g. the do-nothing stub would appear to "converge" because an
+# earlier real impl's binary is still in build/. Touching the sources guarantees
+# make rebuilds `node` from exactly what's in mixnet/ right now.
+touch "$MIXNET"/*.c "$MIXNET"/*.h 2>/dev/null || true
 mkdir -p "$ROOT/build"
 ( cd "$ROOT/build" && cmake .. >/dev/null && make node "$TESTCASE" >/dev/null )
 
