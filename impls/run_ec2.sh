@@ -34,16 +34,16 @@
 #                (default: first host's private IP, via `hostname -I`)
 #   SSH_KEY      path to your EC2 private key (.pem); wired in as `ssh -i`
 #   SSH          ssh command                (default: ssh -o BatchMode=yes ...)
-#   SYNC         rsync this tree to each host and rebuild first (default: 1;
-#                set SYNC=0 to skip the ENTIRE toolchain+rsync+build section once
-#                every host is already synced & built). Note: even with SYNC=1,
-#                the one-time `cmake` configure is skipped automatically on hosts
-#                that already have build/CMakeCache.txt — only `make` re-runs.
+#   SYNC         rsync this tree to each host and (re-)configure + build first
+#                (default: 1; set SYNC=0 to skip the ENTIRE toolchain+rsync+build
+#                section once every host is already synced & built). SYNC=1 always
+#                re-runs cmake so newly-added testcase*.cpp files (globbed at
+#                configure time) get built; `make` is still incremental.
 #
 # Example:
 #   SSH_KEY=<path to key> ./impls/run_ec2.sh testcase_stp_convergence_ring hosts.txt         # build mixnet/ as-is, sync+build+run
 #   SSH_KEY=<path to key> IMPL=../student_impls/impl1.c ./impls/run_ec2.sh testcase_stp_convergence_line hosts.txt  # stage a different impl, then run
-#   SSH_KEY=<path to key> SYNC=1 ./impls/run_ec2.sh testcase_stp_convergence_ring hosts.txt  # re-sync + incremental make (cmake skipped if already configured)
+#   SSH_KEY=<path to key> SYNC=1 ./impls/run_ec2.sh testcase_stp_convergence_ring hosts.txt  # re-sync + re-configure (picks up new testcases) + incremental make
 #   SSH_KEY=<path to key> SYNC=0 ./impls/run_ec2.sh testcase_stp_convergence_tree hosts.txt  # skip sync+build entirely, reuse the existing binaries
 #   NODE_LOGS=1 IMPL=~/mixnet/node.c SSH_KEY=<path to key> ./impls/run_ec2.sh testcase_rtt_line hosts.txt  # ping/RTT: source node prints "RTT to 7: <ms> ms" (needs cp2 routing; see NODE_LOGS)
 #
@@ -183,11 +183,14 @@ if [ "${SYNC:-1}" != "0" ]; then
                 --exclude '.git' --exclude 'build' --exclude 'impls/submission.zip' \
                 -e "$SSH" "$ROOT"/ "$h:$REMOTE_DIR"/
         fi
-        # Configure with cmake only once: if build/CMakeCache.txt already exists
-        # the configure step succeeded before, so skip straight to an
-        # (incremental) make. `make` still recompiles changed sources cheaply.
+        # Always (re-)configure with cmake, then build. Re-running cmake is cheap
+        # for an unchanged tree, and it is REQUIRED to pick up newly-added source
+        # files: testing/lab/CMakeLists.txt uses file(GLOB "testcase*.cpp"), which
+        # is only evaluated at configure time — so a new RTT/convergence testcase
+        # (e.g. testcase_rtt_tree.cpp) won't build (and run_ec2 can't find it)
+        # unless cmake re-runs. `make` still does an incremental compile.
         # shellcheck disable=SC2086
-        $SSH "$h" "cd '$REMOTE_DIR' && { [ -f build/CMakeCache.txt ] || cmake -S . -B build >/dev/null; } && make -C build -j\$(nproc) >/dev/null && echo '   build ok'"
+        $SSH "$h" "cd '$REMOTE_DIR' && cmake -S . -B build >/dev/null && make -C build -j\$(nproc) >/dev/null && echo '   build ok'"
     done
 fi
 
